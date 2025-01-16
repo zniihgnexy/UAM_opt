@@ -71,32 +71,61 @@ model.setObjective(
 
 # === 约束条件 ===
 
-# 路径唯一性约束
-for t in time_intervals:
-    for o in range(len(orders[t])):
-        model.addConstr(
-            quicksum(x[t, o, p, q] for p in vertiports for q in vertiports if p != q) == 1,
-            name=f"path_uniqueness_{t}_{o}"
-        )
+# # 路径唯一性约束
+# for t in time_intervals:
+#     for o in range(len(orders[t])):
+#         model.addConstr(
+#             quicksum(x[t, o, p, q] for p in vertiports for q in vertiports if p != q) == 1,
+#             name=f"path_uniqueness_{t}_{o}"
+#         )
 
-# 容量限制约束
-for t in time_intervals:
-    for p in vertiports:
-        for q in vertiports:
-            if p != q:
-                model.addConstr(
-                    quicksum(x[t, o, p, q] * orders[t][o][2] for o in range(len(orders[t]))) <= capacity,
-                    name=f"capacity_limit_{t}_{p}_{q}"
-                )
+# # 容量限制约束
+# for t in time_intervals:
+#     for p in vertiports:
+#         for q in vertiports:
+#             if p != q:
+#                 model.addConstr(
+#                     quicksum(x[t, o, p, q] * orders[t][o][2] for o in range(len(orders[t]))) <= capacity,
+#                     name=f"capacity_limit_{t}_{p}_{q}"
+#                 )
 
-# 启用逻辑约束
-for t in time_intervals:
-    for o in range(len(orders[t])):
-        for p in vertiports:
-            for q in vertiports:
-                if p != q:
-                    model.addConstr(x[t, o, p, q] <= z[p], name=f"path_activation_start_{t}_{o}_{p}_{q}")
-                    model.addConstr(x[t, o, p, q] <= z[q], name=f"path_activation_end_{t}_{o}_{p}_{q}")
+# # 启用逻辑约束
+# for t in time_intervals:
+#     for o in range(len(orders[t])):
+#         for p in vertiports:
+#             for q in vertiports:
+#                 if p != q:
+#                     model.addConstr(x[t, o, p, q] <= z[p], name=f"path_activation_start_{t}_{o}_{p}_{q}")
+#                     model.addConstr(x[t, o, p, q] <= z[q], name=f"path_activation_end_{t}_{o}_{p}_{q}")
+
+# Path Uniqueness Constraints
+model.addConstrs(
+    quicksum(x[t, o, p, q] for p in vertiports for q in vertiports if p != q) == 1
+    for t in time_intervals for o in range(len(orders[t]))
+)
+
+# Capacity Constraints
+model.addConstrs(
+    quicksum(x[t, o, p, q] * orders[t][o][2] for o in range(len(orders[t]))) <= capacity
+    for t in time_intervals for p in vertiports for q in vertiports if p != q
+)
+
+# Activation Logic Constraints
+model.addConstrs(
+    x[t, o, p, q] <= z[p]
+    for t in time_intervals for o in range(len(orders[t])) for p in vertiports for q in vertiports if p != q
+)
+model.addConstrs(
+    x[t, o, p, q] <= z[q]
+    for t in time_intervals for o in range(len(orders[t])) for p in vertiports for q in vertiports if p != q
+)
+
+# Ensure Selected Vertiports Minimize Ground-Level Distance
+model.addConstrs(
+    quicksum(x[t, o, p, q] * distance_ground_start[(orders[t][o][0], p)]
+             for q in vertiports if p != q) <= quicksum(distance_ground_start[(orders[t][o][0], v)] for v in vertiports) * z[p]
+    for t in time_intervals for o in range(len(orders[t])) for p in vertiports
+)
 
 # === 求解模型 ===
 model.optimize()
@@ -104,8 +133,12 @@ model.optimize()
 # === 输出结果 ===
 if model.status == GRB.OPTIMAL:
     print(f"Objective value: {model.objVal}")
-    for var in model.getVars():
-        if var.x > 0.5:  # 打印被激活的变量及其值
-            print(f"{var.varName}: {var.x}")
+    print("Selected Vertiports and Flow Amounts:")
+    for t in time_intervals:
+        for o in range(len(orders[t])):
+            for p in vertiports:
+                for q in vertiports:
+                    if p != q and x[t, o, p, q].x > 0.5:
+                        print(f"Time: {t}, Order: {o}, Takeoff: {p}, Landing: {q}, Flow: {orders[t][o][2]}")
 else:
     print("No optimal solution found.")
