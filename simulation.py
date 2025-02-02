@@ -4,6 +4,39 @@ from distance_battery import calculate_distance
 from metrics import calculate_coverage_rate, calculate_cost, update_demand_chart
 from task_assignment import time_step_path_assignment
 from battery_charging import charging_and_battery_update, restore_vehicle_states
+import pandas as pd
+import argparse
+def load_distance_map(distance_file):
+    """加载距离矩阵并生成 distance_map"""
+    distance_matrix = pd.read_csv(distance_file, index_col=0)
+    vertiports = distance_matrix.columns.tolist()
+    distance_map = {}
+    for i, start in enumerate(vertiports):
+        for j, end in enumerate(vertiports):
+            if i != j:
+                distance_map[(start, end)] = distance_matrix.loc[start, end]
+    return distance_map
+
+def load_gurobi_results(file_path: str):
+    """
+    从 CSV 文件加载 Gurobi 结果并转换为列表格式。
+    """
+    # 加载 CSV 文件
+    data = pd.read_csv(file_path)
+
+    # 初始化 gurobi_results_per_time
+    gurobi_results_per_time = []
+
+    # 遍历所有行，转换为字典格式
+    for _, row in data.iterrows():
+        gurobi_results_per_time.append({
+            "start": str(row["start"]),
+            "end": str(row["end"]),
+            "flow": int(row["flow"]),
+            "distance": float(row["distance"])
+        })
+
+    return gurobi_results_per_time
 
 # Plane Status Initialization and Management
 def initialize_plane_status_loc(vehicles, vertiports):
@@ -155,11 +188,26 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
 
 # Example usage
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vertiports_file", default="adjusted_vertiports_numeric.csv")
+    parser.add_argument("--distance_file", default="distance_matrix.csv")
+    parser.add_argument("--gurobi_results_file", default="optimized_results_detailed.csv")
+    args = parser.parse_args()
+
+    # 加载数据
+    vertiports_df = pd.read_csv(args.vertiports_file)
+    vertiports = vertiports_df["Vertiport"].tolist()
+    distance_map = load_distance_map(args.distance_file)
+    gurobi_results_per_time = load_gurobi_results(args.gurobi_results_file)
+
+
     # vehicles = ["V1", "V2", "V3"]
     vehicles_number_each = 2
-    vertiport_number = 3
+    vertiport_number = len(vertiports)
     vehicles = ["V" + str(i) for i in range(1, vehicles_number_each * vertiport_number + 1)]
-    vertiports = ["P1", "P2", "P3"]
+
+
 
     vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports)
     plane_status = initialize_plane_status_loc(vehicles, vertiports)
@@ -168,13 +216,13 @@ if __name__ == "__main__":
     for vertiport in vertiports:
         vertiport_states[vertiport]["activated"] = True
 
-    # Define Gurobi results for simulation
-    gurobi_results_per_time = [
-        [{"start": "P1", "end": "P2", "flow": 3, "distance": 50}],
-        [{"start": "P2", "end": "P3", "flow": 4, "distance": 80}],
-        [{"start": "P3", "end": "P1", "flow": 1, "distance": 60}],
-        [{"start": "P3", "end": "P1", "flow": 1, "distance": 60}],
-    ]
+        # 加载距离映射
+    distance_map = load_distance_map("distance_matrix.csv")
+
+    # 从 CSV 文件加载 Gurobi 模拟结果
+    gurobi_results_per_time = load_gurobi_results("optimized_results_detailed.csv")
+
+
 
     # Run simulation
     run_iterations(
