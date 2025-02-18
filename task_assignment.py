@@ -10,14 +10,15 @@ def time_step_path_assignment(gurobi_results: List[Dict], vehicle_states: Dict, 
         start, end = path["start"], path["end"]
         needed = path["flow"]
         distance = path["distance"]
-
+        uam_required = path["UAM"]  # 新增：是否需要 UAM
         assigned = 0
 
         # Try to assign available planes at the starting location
         available_planes = [
             vehicle_id for vehicle_id, status in plane_status.items()
-            if status["location"] == start and status["status"] == "standby" and status["battery"] >=
-            battery_consumption_required(distance, discharge_rate)
+            if status["location"] == start and status["status"] == "standby"
+            and status["battery"] >= battery_consumption_required(distance, discharge_rate)
+            and (uam_required == 1)  # 只允许 UAM 车辆接 UAM 订单
         ]
 
         for vehicle_id in available_planes:

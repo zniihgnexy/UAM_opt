@@ -14,29 +14,46 @@ def load_distance_map(distance_file):
     for i, start in enumerate(vertiports):
         for j, end in enumerate(vertiports):
             if i != j:
-                distance_map[(start, end)] = distance_matrix.loc[start, end]
+                distance_map[(start, end)] = distance_matrix.loc[start, end] # 
     return distance_map
 
-def load_gurobi_results(file_path: str):
+def load_gurobi_results(file_path: str, processed_data_file: str):
     """
-    从 CSV 文件加载 Gurobi 结果并转换为列表格式。
+    Load Gurobi results from CSV and merge with UAM preference data.
     """
-    # 加载 CSV 文件
+    # Load optimization results
     data = pd.read_csv(file_path)
+    print("Columns in data:", data.columns.tolist())  # Debugging output
 
-    # 初始化 gurobi_results_per_time
+    # Load preprocessed travel data with UAM choices
+    processed_data = pd.read_csv(processed_data_file)
+    print("Columns in processed_data:", processed_data.columns.tolist())  # Debugging output
+
+    # Ensure correct column names
+    expected_columns = ['lat_on', 'lon_on', 'lat_off', 'lon_off', 'UAM']
+    missing_columns = [col for col in expected_columns if col not in processed_data.columns]
+    if missing_columns:
+        raise KeyError(f"Missing columns in processed_data: {missing_columns}")
+
+    # Merge based on location information
+    merged_data = pd.merge(data, processed_data, on=['lat_on', 'lon_on', 'lat_off', 'lon_off'], how='left')
+
+    # Fill missing UAM values with 0 (default to not using UAM)
+    merged_data['UAM'] = merged_data['UAM'].fillna(0).astype(int)
+
+    # Convert to required format
     gurobi_results_per_time = []
-
-    # 遍历所有行，转换为字典格式
-    for _, row in data.iterrows():
+    for _, row in merged_data.iterrows():
         gurobi_results_per_time.append({
             "start": str(row["start"]),
             "end": str(row["end"]),
             "flow": int(row["flow"]),
-            "distance": float(row["distance"])
+            "distance": float(row["distance"]),
+            "UAM": int(row["UAM"])
         })
 
     return gurobi_results_per_time
+
 
 # Plane Status Initialization and Management
 def initialize_plane_status_loc(vehicles, vertiports):
@@ -193,13 +210,14 @@ if __name__ == "__main__":
     parser.add_argument("--vertiports_file", default="adjusted_vertiports_numeric.csv")
     parser.add_argument("--distance_file", default="distance_matrix.csv")
     parser.add_argument("--gurobi_results_file", default="optimized_results_detailed.csv")
+    parser.add_argument("--processed_data_file", default="processed_travel_data.csv")  # 新增处理后数据文件
     args = parser.parse_args()
 
     # 加载数据
     vertiports_df = pd.read_csv(args.vertiports_file)
     vertiports = vertiports_df["Vertiport"].tolist()
     distance_map = load_distance_map(args.distance_file)
-    gurobi_results_per_time = load_gurobi_results(args.gurobi_results_file)
+    gurobi_results_per_time = load_gurobi_results(args.gurobi_results_file, args.processed_data_file)
 
 
     # vehicles = ["V1", "V2", "V3"]
@@ -209,7 +227,7 @@ if __name__ == "__main__":
 
 
 
-    vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports)
+    vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports, vertiport_number)
     plane_status = initialize_plane_status_loc(vehicles, vertiports)
 
     # Activate all vertiports

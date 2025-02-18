@@ -1,8 +1,9 @@
 from typing import List, Dict
 
-def initialize_states_with_time(vehicles: List[str], vertiports: List[str]):
+def initialize_states_with_time(vehicles: List[str], vertiports: List[str], vertiport_numbers: List[int]):
     """Initialize states for vehicles and vertiports."""
-    vehicle_states = {
+    vertiport_numbers = vertiport_numbers[:len(vertiports)]
+    vehicle_states = {# location of vehicle, battery level, and availability
         k: {"activated": True, "avail": 1, "charging": 0, "in_service": 0, "battery": 100, "loc": vertiports[0]}
         for k in vehicles
     }
