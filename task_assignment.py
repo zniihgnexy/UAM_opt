@@ -10,16 +10,16 @@ def time_step_path_assignment(gurobi_results: List[Dict], vehicle_states: Dict, 
         start, end = path["start"], path["end"]
         needed = path["flow"]
         distance = path["distance"]
-        uam_required = path["UAM"]  # 新增：是否需要 UAM
+
         assigned = 0
 
         # Try to assign available planes at the starting location
         available_planes = [
             vehicle_id for vehicle_id, status in plane_status.items()
-            if status["location"] == start and status["status"] == "standby"
-            and status["battery"] >= battery_consumption_required(distance, discharge_rate)
-            and (uam_required == 1)  # 只允许 UAM 车辆接 UAM 订单
+            if status["location"] == start and status["status"] == "standby" and status["battery"] >=
+            battery_consumption_required(distance, discharge_rate)
         ]
+        print(f"Available planes for path {start} -> {end}: {available_planes}")
 
         for vehicle_id in available_planes:
             # Assign the plane to the task
@@ -34,7 +34,11 @@ def time_step_path_assignment(gurobi_results: List[Dict], vehicle_states: Dict, 
             if assigned >= needed:
                 break
 
+        print(f"Assigning planes for {start} -> {end}: Needed: {needed}, Assigned: {assigned}")
+
         # Update unmet demand
         if assigned < needed:
             unmet_demand.append((start, end, needed - assigned))
 
+    # Debug: print unmet demand
+    print(f"Updated unmet demand: {unmet_demand}")

@@ -7,6 +7,11 @@ import math
 file_path = "hh-odflow.npz"
 data = np.load(file_path)
 flow_data = data['arr_0']
+# 加载停机坪数据
+vertiport_data = pd.read_csv("adjusted_vertiports_numeric.csv")
+
+# 创建一个从 Grid_ID 到停机坪名称（Vertiport）的字典
+grid_to_vertiport = dict(zip(vertiport_data['Grid_ID'], vertiport_data['Vertiport']))
 
 # 限制的时间区间数量和批次大小
 MAX_TIME_INTERVALS = 500
@@ -147,6 +152,8 @@ for batch_idx, batch in enumerate(batches):
                 for p in vertiports:
                     for q in vertiports:
                         if p != q and x[t, o, p, q].x > 0.5:
+                            start_vertiport = grid_to_vertiport.get(batch_orders[t][o][0], "Unknown")
+                            end_vertiport = grid_to_vertiport.get(batch_orders[t][o][1], "Unknown")
                             all_results.append((t, o, p, q, batch_orders[t][o][2]))
         for p in vertiports:
             if z[p].x > 0.5:
@@ -155,6 +162,6 @@ for batch_idx, batch in enumerate(batches):
         print(f"Batch {batch_idx + 1} did not find an optimal solution.")
 
 # 保存最终结果
-results_df = pd.DataFrame(all_results, columns=["Time", "Order", "Takeoff", "Landing", "Flow"])
-results_df.to_csv("optimized_results.csv", index=False)
-print("优化结果已保存至 'optimized_results.csv'")
+results_df = pd.DataFrame(all_results, columns=["Time", "Order", "Start_Vertiport", "End_Vertiport", "Flow"])
+results_df.to_csv("optimized_results_with_vertiport_mapping.csv", index=False)
+print("优化结果已保存至 'optimized_results_with_vertiport_mapping.csv'")
