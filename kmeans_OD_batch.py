@@ -14,8 +14,8 @@ vertiport_data = pd.read_csv("adjusted_vertiports_numeric.csv")
 grid_to_vertiport = dict(zip(vertiport_data['Grid_ID'], vertiport_data['Vertiport']))
 
 # 限制的时间区间数量和批次大小
-MAX_TIME_INTERVALS = 500
-BATCH_SIZE = 50
+MAX_TIME_INTERVALS = 50
+BATCH_SIZE = 5
 
 # 构造时间区间
 time_intervals = [f"T{t}" for t in range(min(MAX_TIME_INTERVALS, flow_data.shape[0]))]
@@ -147,6 +147,8 @@ for batch_idx, batch in enumerate(batches):
     # 处理结果
     if model.status == GRB.OPTIMAL:
         print(f"Batch {batch_idx + 1} Objective value: {model.objVal}")
+
+        used_vertiports = set()
         for t in batch:
             for o in range(len(batch_orders[t])):
                 for p in vertiports:
@@ -155,13 +157,45 @@ for batch_idx, batch in enumerate(batches):
                             start_vertiport = grid_to_vertiport.get(batch_orders[t][o][0], "Unknown")
                             end_vertiport = grid_to_vertiport.get(batch_orders[t][o][1], "Unknown")
                             all_results.append((t, o, p, q, batch_orders[t][o][2]))
+        if 757 in used_vertiports:
+            print("✅ Vertiport 5 (Grid_ID 757) 被使用了！")
+        else:
+            print("❌ Vertiport 5 (Grid_ID 757) **没有被使用**！")
+
+        if z[757].x > 0.5:
+            print("✅ Vertiport 5 (Grid_ID 757) 被 Gurobi 选中并启用！")
+        else:
+            print("❌ Vertiport 5 (Grid_ID 757) **未被启用！可能由于 activation_penalty 过高**")
+
+        print("🔍 检查 Vertiport 5 (Grid_ID 757) 的空中运输成本...")
+        for q in vertiports:
+            if q != 757:
+                print(f"  ✈️  757 -> {q}: {distance_air.get((757, q), '无数据')}")
+
+        print("🔍 检查 Vertiport 5 (Grid_ID 757) 是否在地面运输成本中...")
+        start_costs = [distance_ground_start.get((i, 757), "无数据") for t in batch for (i, j, _) in batch_orders[t]]
+        end_costs = [distance_ground_end.get((j, 757), "无数据") for t in batch for (i, j, _) in batch_orders[t]]
+        print(f"  🏁 起点 -> 757: {start_costs[:10]}")
+        print(f"  🚀 757 -> 终点: {end_costs[:10]}")
+        orders_involving_757 = [
+            (t, i, j, flow)
+            for t in batch
+            for (i, j, flow) in batch_orders[t]
+            if i == 757 or j == 757
+        ]
+        if orders_involving_757:
+            print(f"✅ 找到 {len(orders_involving_757)} 个涉及 757 的订单: {orders_involving_757[:10]}")
+        else:
+            print("❌ 订单数据中没有涉及 Vertiport 5 (Grid_ID 757)！")
         for p in vertiports:
             if z[p].x > 0.5:
                 print(f"Vertiport {p} is activated in batch {batch_idx + 1}.")
     else:
+
         print(f"Batch {batch_idx + 1} did not find an optimal solution.")
 
 # 保存最终结果
-results_df = pd.DataFrame(all_results, columns=["Time", "Order", "Start_Vertiport", "End_Vertiport", "Flow"])
-results_df.to_csv("optimized_results_with_vertiport_mapping.csv", index=False)
-print("优化结果已保存至 'optimized_results_with_vertiport_mapping.csv'")
+# results_df = pd.DataFrame(all_results, columns=["Time", "Order", "Start_Vertiport", "End_Vertiport", "Flow"])
+# results_df.to_csv("optimized_results_with_vertiport_mapp"
+#                   "ing.csv", index=False)
+# print("优化结果已保存至 'optimized_results_with_vertiport_mapping.csv'")

@@ -6,16 +6,44 @@ def calculate_coverage_rate(actual_met_demand: int, total_demand: int) -> float:
         return 0  # Avoid division by zero
     return actual_met_demand / total_demand
 
+#
+# def calculate_cost(activated_vertiports: List[str], cost_per_distance: float, distance_map: Dict) -> float:
+#     """Calculate the total cost based on activated vertiports and their distances."""
+#     total_cost = 0
+#     for i in range(len(activated_vertiports) - 1):
+#         loc1, loc2 = activated_vertiports[i], activated_vertiports[i + 1]
+#         distance = distance_map.get((loc1, loc2), 0)
+#         total_cost += distance * cost_per_distance
+#     return total_cost
+from typing import List, Dict
 
-def calculate_cost(activated_vertiports: List[str], cost_per_distance: float, distance_map: Dict) -> float:
-    """Calculate the total cost based on activated vertiports and their distances."""
+
+def calculate_cost(
+        flow_data: List[dict],
+        cost_per_distance: float,
+        distance_map: Dict[tuple, float]
+) -> float:
+    """Calculate total cost based on ACTUAL FLOWS and distances.
+
+    Args:
+        flow_data: Gurobi优化结果，包含每条路径的流量和距离
+        cost_per_distance: 单位距离成本 (e.g., $/km)
+        distance_map: 预定义的距离矩阵 {(start, end): distance}
+    """
     total_cost = 0
-    for i in range(len(activated_vertiports) - 1):
-        loc1, loc2 = activated_vertiports[i], activated_vertiports[i + 1]
-        distance = distance_map.get((loc1, loc2), 0)
-        total_cost += distance * cost_per_distance
-    return total_cost
 
+    for route in flow_data:
+        start = route["start"]
+        end = route["end"]
+        flow = route.get("flow", 0)  # 实际分配的流量
+
+        # 获取路径距离（若不存在则默认为0）
+        distance = distance_map.get((start, end), 0)
+
+        # 累加成本：流量 × 距离 × 单位成本
+        total_cost += flow * distance * cost_per_distance
+
+    return total_cost
 
 def update_demand_chart(unmet_demand: List[Tuple[str, str, int]], new_demand: List[Dict]) -> int:
     """

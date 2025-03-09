@@ -1,4 +1,5 @@
 from generate_solution import regenerate_solution
+from gurobi_optimization import run_gurobi_optimization
 from initialization import initialize_states_with_time
 from distance_battery import calculate_distance
 from metrics import calculate_coverage_rate, calculate_cost, update_demand_chart
@@ -37,25 +38,44 @@ def load_gurobi_results(file_path: str, time_step: int):
 
 
 # Plane Status Initialization and Management
-def initialize_plane_status_loc(vehicles, vertiports):
+def initialize_plane_status_loc(vehicles, vertiports, vehicles_number_each):
     """Initialize the plane status for all vehicles at the starting location."""
-    return {
-        vehicle_id: {
-            "battery": 100,
-            # same number of vehicles at each vertiport
-            "location": vertiports[i % len(vertiports)],
-            "status": "standby"  # Possible statuses: "standby", "in_service", "charging"
-        }
-        for i, vehicle_id in enumerate(vehicles)
-    }
+    plane_status = {}
+    num_vertiports = len(vertiports)
 
-def reset_plane_status(plane_status):
-    """Reset the status of planes after each iteration."""
+    # For each vertiport, assign a group of vehicles to it
+    for i, vertiport in enumerate(vertiports):
+        # Get the vehicles that will be assigned to this vertiport
+        assigned_vehicles = vehicles[i * vehicles_number_each: (i + 1) * vehicles_number_each]
+
+        # Initialize plane status for each vehicle at this vertiport
+        for vehicle_id in assigned_vehicles:
+            plane_status[vehicle_id] = {
+                "battery": 100,
+                "location": vertiport,
+                "status": "standby"
+            }
+
+    return plane_status
+
+
+def reset_plane_status(plane_status, vehicle_states, vertiport_states):
+    """Reset the status of planes and update in-service counts after each iteration."""
     for vehicle_id, status in plane_status.items():
+        location = status["location"]
+
         if status["status"] == "in_service":
-            status["status"] = "standby"  # Planes become standby after completing service
-        elif status["battery"] < 100:
-            status["status"] = "charging"  # Planes with low battery are set to charging
+            #  只有 `standby` 的飞机才增加 `avail`
+            status["status"] = "standby" if status["battery"] >= 20 else "charging"
+            vehicle_states[vehicle_id]["in_service"] = 0
+
+            if location in vertiport_states:
+                vertiport_states[location]["in_service"] = max(0, vertiport_states[location]["in_service"] - 1)
+
+                if status["status"] == "standby":  # 只有 `standby` 飞机才增加 `avail`
+                    vertiport_states[location]["avail"] = max(0, vertiport_states[location]["avail"] + 1)
+
+
 
 # Main Simulation Functions
 def calculate_demand_met(gurobi_results, vehicle_movements, unmet_demand):
@@ -193,11 +213,6 @@ def calculate_demand_met(gurobi_results, vehicle_movements, unmet_demand):
 
 
 # Example usage
-
-
-
-
-
 def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_results_per_time, charging_rate,
                    discharge_rate, regenerate_solution, plane_status, distance_map):
     unmet_demand = []
@@ -209,11 +224,12 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
 
         while not iteration_complete and stuck_iteration < 5:
             print(f"Time Step {t + 1}")
+            print(f"Unmet Demand before current time step: {len(unmet_demand)} orders")
 
 
             # Step 0: Restore vehicle states and reset plane statuses
             restore_vehicle_states(vehicle_states)
-            reset_plane_status(plane_status)
+            reset_plane_status(plane_status,vehicle_states,vertiport_states)
 
             # Initialize movement tracking for this timestep
             vehicle_movements = {vehicle_id: None for vehicle_id in vehicle_states.keys()}
@@ -227,15 +243,20 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
             # Step 2: Assign vehicles to tasks
             if flag == 1:
                 print("Flag set: Retrieving second-best solution from Gurobi.")
-                gurobi_results = regenerate_solution(t, unmet_demand, vehicle_states, vertiport_states, gurobi_results, get_second_best=False)
+                # gurobi_results = regenerate_solution(t, unmet_demand, vehicle_states, vertiport_states, gurobi_results, get_second_best=False)
+                gurobi_results = regenerate_solution(t, unmet_demand, vehicle_states, vertiport_states, gurobi_results)
+                print("!!Gurobi results:", gurobi_results)  # 打印 Gurobi 结果
                 flag = 0
             else:
-                gurobi_results = gurobi_results_per_time[t] + [
-                    {"start": start, "end": end, "flow": needed, "distance": calculate_distance(start, end)}
-                    for start, end, needed in unmet_demand
-                ]
+                # gurobi_results = gurobi_results_per_time[t] + [
+                #     {"start": start, "end": end, "flow": needed, "distance": calculate_distance(start, end)}
+                #     for start, end, needed in unmet_demand
+                # ]
+                gurobi_results = run_gurobi_optimization(t, unmet_demand, gurobi_results_per_time[t], vertiports)
+                print(f"Gurobi optimization results for T{t}: {len(gurobi_results)} orders")
 
-            unmet_demand.clear()
+            # unmet_demand.clear()
+            # print(f"Unmet Demand after optimization: {len(unmet_demand)} orders")
 
             time_step_path_assignment(
                 gurobi_results, vehicle_states, vertiport_states, unmet_demand, discharge_rate,
@@ -248,7 +269,13 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
             print(f"Current Coverage Rate: {coverage_rate:.2f}")
 
             activated_vertiports = [v for v, state in vertiport_states.items() if state["activated"]]
-            total_cost = calculate_cost(activated_vertiports, cost_per_distance=10, distance_map=distance_map)
+            # total_cost = calculate_cost(activated_vertiports, cost_per_distance=10, distance_map=distance_map)
+            # 在仿真循环中调用 calculate_cost 时传入当前流量数据
+            total_cost = calculate_cost(
+                flow_data=gurobi_results,  # 当前时间步的 Gurobi 分配结果
+                cost_per_distance=4,
+                distance_map=distance_map
+            )
             print(f"Current Total Cost: {total_cost:.2f}")
 
             # Print detailed vehicle states
@@ -270,12 +297,12 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
                     print(f"  {vehicle_id} did not move")
 
             print("\nVertiport States:")
-            for vertiport, state in vertiport_states.items():
-                print(f"  {vertiport}: {state}")
-
-            print("\nUnmet Demand:")
-            for demand in unmet_demand:
-                print(f"  {demand}")
+            # for vertiport, state in vertiport_states.items():
+            #     print(f"  {vertiport}: {state}")
+            #
+            # print("\nUnmet Demand:")
+            # for demand in unmet_demand:
+            #     print(f"  {demand}")
 
             print("-" * 50)
 
@@ -285,6 +312,7 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
                 flag = 1
                 stuck_iteration += 1
             else:
+                unmet_demand.clear()
                 iteration_complete = True
 
         # Step 4: Update battery charging
@@ -299,13 +327,14 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
             print("location of the car: ", plane_status[vehicle_id]["location"])
 
         print("-" * 50)
+    return total_met_demand, total_demand
 if __name__ == "__main__":
 
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--vertiports_file", default="adjusted_vertiports_numeric.csv")
     parser.add_argument("--distance_file", default="distance_matrix.csv")
-    parser.add_argument("--gurobi_results_file", default="updated_flow_data_with_vertiports.csv")
+    parser.add_argument("--gurobi_results_file", default="updated_flow_data_with_corrected_distances.csv")
     args = parser.parse_args()
 
     # 加载数据
@@ -329,35 +358,81 @@ if __name__ == "__main__":
     #     print(f"Time step {t}: {results}")
 
     # vehicles = ["V1", "V2", "V3"]
-    vehicles_number_each = 2
-    vertiport_number = len(vertiports)
-    vehicles = ["V" + str(i) for i in range(1, vehicles_number_each * vertiport_number + 1)]
-
-
-
-    vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports,vertiport_number)
-    plane_status = initialize_plane_status_loc(vehicles, vertiports)
-
-    # Activate all vertiports
-    for vertiport in vertiports:
-        vertiport_states[vertiport]["activated"] = True
+    # vehicles_number_each = 5
+    # vertiport_number = len(vertiports)
+    # vehicles = ["V" + str(i) for i in range(1, vehicles_number_each * vertiport_number + 1)]
+    #
+    #
+    # #
+    # vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports,vehicles_number_each)
+    # plane_status = initialize_plane_status_loc(vehicles, vertiports,vehicles_number_each)
+    #
+    # # Activate all vertiports
+    # for vertiport in vertiports:
+    #     vertiport_states[vertiport]["activated"] = True
 
         # 加载距离映射
     distance_map = load_distance_map("distance_matrix.csv")
 
+    # 遍历参数空间
+    charging_rates = [ 40, 50]
+    discharge_rates = [0.1, 10]
+    vehicle_counts = [15, 20]  # **这里已经定义了不同的飞机数量**
 
+    results = []
 
+    for charging_rate in charging_rates:
+        for discharge_rate in discharge_rates:
+            for vehicles_number_each in vehicle_counts:  # **这里动态调整飞机数量**
+                print(
+                    f"Running simulation with Charging Rate={charging_rate}, Discharge Rate={discharge_rate}, Vehicles={vehicles_number_each}")
 
+                # **动态创建不同数量的飞机**
+                vehicles = ["V" + str(i) for i in range(1, vehicles_number_each * len(vertiports) + 1)]
+                vehicle_states, vertiport_states = initialize_states_with_time(vehicles, vertiports,
+                                                                               vehicles_number_each)
+                plane_status = initialize_plane_status_loc(vehicles, vertiports, vehicles_number_each)
+
+                for vertiport in vertiports:
+                    vertiport_states[vertiport]["activated"] = True
+
+                total_met_demand, total_demand=run_iterations(
+                    num_iterations=5,
+                    vehicle_states=vehicle_states,
+                    vertiport_states=vertiport_states,
+                    gurobi_results_per_time=gurobi_results_per_time,
+                    charging_rate=charging_rate,
+                    discharge_rate=discharge_rate,
+                    regenerate_solution=regenerate_solution,
+                    plane_status=plane_status,
+                    distance_map=distance_map
+                )
+
+                coverage_rate = calculate_coverage_rate(total_met_demand, total_demand)
+                total_cost = calculate_cost(gurobi_results, cost_per_distance=2, distance_map=distance_map)
+
+                results.append({
+                    "charging_rate": charging_rate,
+                    "discharge_rate": discharge_rate,
+                    "vehicle_count": vehicles_number_each,  # **确保存储正确的飞机数量**
+                    "coverage_rate": coverage_rate,
+                    "total_cost": total_cost
+                })
+
+    df = pd.DataFrame(results)
+    df.to_csv("sensitivity_analysis_results.csv", index=False)
+
+    print("实验完成，结果已保存到 sensitivity_analysis_results.csv")
 
     # Run simulation
-    run_iterations(
-        num_iterations=2,
-        vehicle_states=vehicle_states,
-        vertiport_states=vertiport_states,
-        gurobi_results_per_time=gurobi_results_per_time,
-        charging_rate=20,
-        discharge_rate=0.5,
-        regenerate_solution=regenerate_solution,
-        plane_status=plane_status,
-        distance_map = distance_map
-    )
+    # run_iterations(
+    #     num_iterations=2,
+    #     vehicle_states=vehicle_states,
+    #     vertiport_states=vertiport_states,
+    #     gurobi_results_per_time=gurobi_results_per_time,
+    #     charging_rate=20,
+    #     discharge_rate=0.1,
+    #     regenerate_solution=regenerate_solution,
+    #     plane_status=plane_status,
+    #     distance_map = distance_map
+    # )
