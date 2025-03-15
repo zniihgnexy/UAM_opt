@@ -3,90 +3,100 @@ import pandas as pd
 from gurobipy import Model, GRB, quicksum
 import math
 
-# **空中距离矩阵**
+# Load the distance matrix and compute the air transportation cost
 distance_matrix = pd.read_csv("distance_matrix.csv", index_col=0)
-
-# **空中距离矩阵**
 distance_air = {
-    (p, q): distance_matrix.loc[p, q] * 10  # 这里的 `10` 代表空中运输成本
+    (p, q): distance_matrix.loc[p, q] * 10  # Here, 10 represents the air transport cost factor
     for p in distance_matrix.index
     for q in distance_matrix.columns
     if p != q
 }
 
-# **Gurobi 计算优化**
 def run_gurobi_optimization(time_step, unmet_demand, gurobi_results_per_time, vertiports):
     """
-    运行 Gurobi 进行航线优化，考虑 `unmet_demand` + `gurobi_results_per_time[t]` 的最新需求。
-
-    输入：
-    - `time_step`：当前时间步
-    - `unmet_demand`：上一轮未满足的需求 [(start, end, flow), ...]
-    - `gurobi_results_per_time`：当前时间步的 Gurobi 需求
-    - `vertiports`：停机坪列表
-
-    输出：
-    - `gurobi_results`：优化后的结果 [{"start": x, "end": y, "flow": f, "distance": d}, ...]
+    Run Gurobi optimization for route assignment while prioritizing coverage.
+    
+    Parameters:
+      - time_step: Current time step.
+      - unmet_demand: List of tuples (start, end, flow) from previous iterations.
+      - gurobi_results_per_time: List of dictionaries (with keys "start", "end", "flow") for the current time step.
+      - vertiports: List of vertiport identifiers.
+      
+    Returns:
+      - gurobi_results: List of dictionaries with keys "start", "end", "flow", and "distance".
+      - unmet_demand_next: List of tuples (start, end, remaining flow) for any unfulfilled orders.
     """
-    print(f"🚀 运行 Gurobi 优化, 时间步: T{time_step}")
-
-    # **合并上一轮未满足的需求 + 这一时间步的新需求**
+    print(f"🚀 Running Gurobi optimization, Time Step: T{time_step}")
+    
+    # Combine previous unmet demand with new demand for the current time step.
     total_orders = unmet_demand + [
         (row["start"], row["end"], int(row["flow"]))
-        for row in gurobi_results_per_time  #
+        for row in gurobi_results_per_time
     ]
-
-    # === 初始化模型 ===
+    
+    if not total_orders:
+        print("No orders to optimize.")
+        return [], []
+    
     model = Model(f"UAM_T{time_step}")
-
-    # **决策变量**
+    
+    # Decision variables: x[o, p, q] represents the flow assigned for order o using takeoff p and landing q.
     x = model.addVars(
-        range(len(total_orders)),  # 订单编号
-        vertiports,  # 起飞停机坪
-        vertiports,  # 降落停机坪
-        vtype=GRB.INTEGER,  # 离散变量，表示分配的流量是整数
+        range(len(total_orders)),
+        vertiports,
+        vertiports,
+        vtype=GRB.INTEGER,
         name="x"
     )
+    
+    # Constraint: For each order, the sum of assigned flows must not exceed the order’s total demand.
+    model.addConstrs(
+        quicksum(x[o, p, q] for p in vertiports for q in vertiports if p != q) <= total_orders[o][2]
+        for o in range(len(total_orders))
+    )
+    
+    # Set a large constant (bigM) to prioritize coverage over cost.
+    bigM = 1e6
 
-    # **目标函数**
+    # Objective: Maximize total assigned flow (weighted by bigM) minus the cost.
     model.setObjective(
         quicksum(
-            x[o, p, q] * (
-                distance_air.get((p, q), 0)  # 空中运输的距离
-            )
+            x[o, p, q] * (bigM - distance_air.get((p, q), 0))
             for o in range(len(total_orders))
             for p in vertiports
-            for q in vertiports if p != q  # 目标：起飞停机坪和降落停机坪不能是同一个
+            for q in vertiports if p != q
         ),
-        GRB.MINIMIZE
+        GRB.MAXIMIZE
     )
-
-    # **约束条件**
-    # 每个订单的流量应该完全分配，且分配到一个起飞停机坪到一个降落停机坪之间，且不能是同一个停机坪
-    model.addConstrs(
-        quicksum(x[o, p, q] for p in vertiports for q in vertiports if p != q) == total_orders[o][2]
-        for o in range(len(total_orders))  # 每个订单的流量要完全分配
-    )
-
-    # **求解模型**
+    
     model.optimize()
-
-    # **处理结果**
+    
     gurobi_results = []
-    if model.status == GRB.OPTIMAL:
-        print(f"T{time_step} 优化目标值: {model.objVal}")
-        total_assigned_flow = 0
+    unmet_demand_next = []
+    
+    if model.status in [GRB.OPTIMAL, GRB.TIME_LIMIT]:
         for o in range(len(total_orders)):
+            # Sum the flow assigned to order o across all (p,q) pairs.
+            assigned_flow = sum(x[o, p, q].x for p in vertiports for q in vertiports if p != q)
+            # For reporting, select a representative (p,q) pair (the one with the largest assignment).
+            best_p, best_q, best_flow = None, None, 0
             for p in vertiports:
                 for q in vertiports:
-                    if p != q and x[o, p, q].x > 0.5:
-                        flow_assigned = total_orders[o][2]
-                        gurobi_results.append({
-                            "start": total_orders[o][0],
-                            "end": total_orders[o][1],
-                            "flow": x[o, p, q].x,
-                            "distance": distance_air.get((p, q), 0)
-                        })
-                        total_assigned_flow += flow_assigned
-        print(f"Total assigned flow: {total_assigned_flow}")
-    return gurobi_results
+                    if p != q and x[o, p, q].x > best_flow:
+                        best_flow = x[o, p, q].x
+                        best_p, best_q = p, q
+            gurobi_results.append({
+                "start": total_orders[o][0],
+                "end": total_orders[o][1],
+                "flow": assigned_flow,
+                "distance": distance_air.get((best_p, best_q), 0) if best_p is not None and best_q is not None else 0
+            })
+            
+            # Calculate any remaining unfulfilled demand.
+            unfulfilled = total_orders[o][2] - assigned_flow
+            if unfulfilled > 0:
+                unmet_demand_next.append((total_orders[o][0], total_orders[o][1], unfulfilled))
+    else:
+        print("No optimal solution found.")
+    
+    return gurobi_results, unmet_demand_next

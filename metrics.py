@@ -50,9 +50,9 @@ def update_demand_chart(unmet_demand: List[Tuple[str, str, int]], new_demand: Li
     Updates the demand chart by including the unmet demand from the previous iteration
     and the new demand for the current iteration.
     """
-    print("Debug inside update_demand_chart:")
-    print("  unmet_demand =", unmet_demand)
-    print("  new_demand =", new_demand)
+    # print("Debug inside update_demand_chart:")
+    # print("  unmet_demand =", unmet_demand)
+    # print("  new_demand =", new_demand)
 
     # 确保 unmet_demand 是预期的列表格式
     if not all(isinstance(d, tuple) and len(d) == 3 for d in unmet_demand):

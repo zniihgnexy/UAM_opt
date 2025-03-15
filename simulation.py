@@ -214,7 +214,7 @@ def calculate_demand_met(gurobi_results, vehicle_movements, unmet_demand):
 
 # Example usage
 def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_results_per_time, charging_rate,
-                   discharge_rate, regenerate_solution, plane_status, distance_map):
+                   discharge_rate, regenerate_solution, plane_status, distance_map, vertiports):
     unmet_demand = []
     flag = 0  # Initialize flag
     stuck_iteration = 0
@@ -328,6 +328,8 @@ def run_iterations(num_iterations, vehicle_states, vertiport_states, gurobi_resu
 
         print("-" * 50)
     return total_met_demand, total_demand
+
+
 if __name__ == "__main__":
 
 
@@ -375,9 +377,9 @@ if __name__ == "__main__":
     distance_map = load_distance_map("distance_matrix.csv")
 
     # 遍历参数空间
-    charging_rates = [ 40, 50]
-    discharge_rates = [0.1, 10]
-    vehicle_counts = [15, 20]  # **这里已经定义了不同的飞机数量**
+    charging_rates = [ 40]
+    discharge_rates = [1]
+    vehicle_counts = [15]  # **这里已经定义了不同的飞机数量**
 
     results = []
 
@@ -397,7 +399,7 @@ if __name__ == "__main__":
                     vertiport_states[vertiport]["activated"] = True
 
                 total_met_demand, total_demand=run_iterations(
-                    num_iterations=5,
+                    num_iterations=20,
                     vehicle_states=vehicle_states,
                     vertiport_states=vertiport_states,
                     gurobi_results_per_time=gurobi_results_per_time,
@@ -405,7 +407,8 @@ if __name__ == "__main__":
                     discharge_rate=discharge_rate,
                     regenerate_solution=regenerate_solution,
                     plane_status=plane_status,
-                    distance_map=distance_map
+                    distance_map=distance_map,
+                    vertiports=vertiports
                 )
 
                 coverage_rate = calculate_coverage_rate(total_met_demand, total_demand)

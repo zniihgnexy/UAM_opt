@@ -49,7 +49,7 @@ def regenerate_solution(t: int, unmet_demand: List, vehicle_states: Dict, vertip
     new_solution = solve_gurobi(combined_demand,vertiport_states)
 
     # 打印 Gurobi 结果
-    print("Gurobi results:", new_solution)
+    # print("Gurobi results:", new_solution)
 
     return new_solution
 
