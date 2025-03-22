@@ -1,6 +1,6 @@
 from typing import List, Dict
 from distance_battery import calculate_distance
-from gurobi_solver import solve_gurobi
+from gurobi_optimization import run_gurobi_optimization
 
 import pandas as pd
 from typing import List, Dict
@@ -46,7 +46,7 @@ def regenerate_solution(t: int, unmet_demand: List, vehicle_states: Dict, vertip
         return []
     # 调用 Gurobi 求解器并请求次优解（可选）
     # new_solution = solve_gurobi(combined_demand, banned_solutions=None, get_second_best=get_second_best)
-    new_solution = solve_gurobi(combined_demand,vertiport_states)
+    new_solution = run_gurobi_optimization(combined_demand,vertiport_states)
 
     # 打印 Gurobi 结果
     # print("Gurobi results:", new_solution)
